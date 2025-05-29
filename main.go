@@ -388,7 +388,7 @@ func main() {
 		"http://localhost:5173", // 로컬 React 개발 서버 URL
 		"https://valorant-abusing-frontend.vercel.app", // **여기에 당신의 Vercel 프론트엔드 URL을 입력하세요!**
 		// 예시: "https://valorant-abusing-detector-frontend.vercel.app"
-	}
+	}//Test change
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"} // 필요한 헤더 추가 (Authorization 같은 헤더도 추가해두면 좋습니다)
 	corsConfig.AllowCredentials = true // 쿠키/인증 정보 전송 허용
