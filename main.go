@@ -296,7 +296,7 @@ func CheckForAbusing(matchesColl *mongo.Collection, targetPUUID string) ([]strin
 			lossRatio := float64(stats.LossesAgainst) / float64(stats.MatchesMet)
 
 			// 규칙 1: 특정 상대에게 KDA가 비정상적으로 낮은 경우
-			if avgKDA <= MAX_AVG_KDA_AGAINT_OPPONENT {
+			if avgKDA <= MAX_AVG_KDA_AGAINST_OPPONENT {
 				suspiciousFindings = append(suspiciousFindings,
 					fmt.Sprintf("상대 PUUID: %s, 대전 횟수: %d회, 플레이어 평균 KDA: %.2f (임계값 %.2f 이하로 매우 낮음 - 고의 패배 의심)",
 						stats.PUUID, stats.MatchesMet, avgKDA, MAX_AVG_KDA_AGAINST_OPPONENT))
@@ -377,26 +377,9 @@ func main() {
 	// ---------------------------------------------------------------------
 	router := gin.Default() // Gin 라우터 인스턴스 생성 (기본 미들웨어 포함)
 
+	// --- 수정된 CORS 설정 (모든 오리진 허용 - 테스트용!!) ---
+	router.Use(cors.AllowAll().Handler()) // 모든 오리진과 모든 메서드 허용
 	// ----------------------------------------------------
-	// 올바른 CORS 미들웨어 설정 (기존 CORS 코드와 교체)
-	// ----------------------------------------------------
-	corsConfig := cors.DefaultConfig()
-
-	// 중요: Vercel에 배포된 프론트엔드의 실제 URL로 바꿔주세요!
-	// 로컬 개발용 URL도 포함시켜 두는 것이 좋습니다.
-	corsConfig.AllowedOrigins = []string{
-		"http://localhost:5173", // 로컬 React 개발 서버 URL
-		"https://valorant-abusing-frontend-nl2zoffma-park-yunjaes-projects.vercel.app", // **여기에 당신의 Vercel 프론트엔드 URL을 입력하세요!**
-		// 예시: "https://valorant-abusing-detector-frontend.vercel.app"
-	}//Test
-	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"} // 필요한 헤더 추가 (Authorization 같은 헤더도 추가해두면 좋습니다)
-	corsConfig.AllowCredentials = true // 쿠키/인증 정보 전송 허용
-	corsConfig.MaxAge = 300 // 5분 (프리플라이트 요청 캐싱 시간)
-
-	router.Use(cors.New(corsConfig)) // Gin에 CORS 미들웨어 적용
-	// ----------------------------------------------------
-
 
 	// Health Check 엔드포인트
 	router.GET("/ping", func(c *gin.Context) {
