@@ -386,7 +386,7 @@ func main() {
 	// 로컬 개발용 URL도 포함시켜 두는 것이 좋습니다.
 	corsConfig.AllowedOrigins = []string{
 		"http://localhost:5173", // 로컬 React 개발 서버 URL
-		"https://valorant-abusing-frontend-mfvh52vve-park-yunjaes-projects.vercel.app", // **여기에 당신의 Vercel 프론트엔드 URL을 입력하세요!**
+		"https://valorant-abusing-frontend-nl2zoffma-park-yunjaes-projects.vercel.app", // **여기에 당신의 Vercel 프론트엔드 URL을 입력하세요!**
 		// 예시: "https://valorant-abusing-detector-frontend.vercel.app"
 	}//Test
 	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
