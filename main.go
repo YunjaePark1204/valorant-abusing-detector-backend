@@ -1,34 +1,34 @@
 package main
 
 import (
-	"context"       // 컨텍스트를 사용하여 API 호출 및 DB 작업 타임아웃/취소 관리
+	"context" // 컨텍스트를 사용하여 API 호출 및 DB 작업 타임아웃/취소 관리
 	"encoding/json" // JSON 데이터를 파싱하기 위해 사용
 	"fmt"
-	"log"           // 로깅을 위해 사용
-	"math"          // KDA 계산 시 0으로 나누는 것을 방지하기 위해 사용
-	"net/http"      // HTTP 상태 코드 사용
-	"os"            // 환경 변수를 읽기 위해 사용
-	"strconv"       // 문자열을 숫자로 변환하기 위해 사용
-	"time"          // 시간 관련 작업 (타임아웃, Rate Limiter)
+	"log" // 로깅을 위해 사용
+	"math" // KDA 계산 시 0으로 나누는 것을 방지하기 위해 사용
+	"net/http" // HTTP 상태 코드 사용
+	"os" // 환경 변수를 읽기 위해 사용
+	"strconv" // 문자열을 숫자로 변환하기 위해 사용
+	"time" // 시간 관련 작업 (타임아웃, Rate Limiter)
 
-	"github.com/gin-gonic/gin"                // Gin 웹 프레임워크 임포트
-	"go.mongodb.org/mongo-driver/bson"        // MongoDB 쿼리 필터 생성을 위해 추가
-	"go.mongodb.org/mongo-driver/mongo"       // MongoDB 드라이버 임포트
+	"github.com/gin-gonic/gin" // Gin 웹 프레임워크 임포트
+	"go.mongodb.org/mongo-driver/bson" // MongoDB 쿼리 필터 생성을 위해 추가
+	"go.mongodb.org/mongo-driver/mongo" // MongoDB 드라이버 임포트
 	"go.mongodb.org/mongo-driver/mongo/options" // MongoDB 연결 옵션 설정
 	"go.mongodb.org/mongo-driver/mongo/readpref" // MongoDB 연결 확인용
-	
+
 	"golang.org/x/time/rate" // Rate Limiter 라이브러리 임포트
 
-	"github.com/rs/cors"
+	"github.com/rs/cors" // CORS 라이브러리 임포트
 )
 
 // OpponentInteraction은 특정 플레이어와 한 명의 상대방 간의 누적된 경기 통계를 저장합니다.
 type OpponentInteraction struct {
-	PUUID            string  // 상대방의 PUUID
-	MatchesMet       int     // 상대방과 함께 플레이한 총 경기 수
-	WinsAgainst      int     // 플레이어가 상대방을 만났을 때 이긴 횟수
-	LossesAgainst    int     // 플레이어가 상대방을 만났을 때 진 횟수
-	TotalKDAAgainst  float64 // 상대방과 만났을 때 플레이어의 KDA 총합 (평균 계산용)
+	PUUID         string  // 상대방의 PUUID
+	MatchesMet    int     // 상대방과 함께 플레이한 총 경기 수
+	WinsAgainst   int     // 플레이어가 상대방을 만났을 때 이긴 횟수
+	LossesAgainst int     // 플레이어가 상대방을 만났을 때 진 횟수
+	TotalKDAAgainst float64 // 상대방과 만났을 때 플레이어의 KDA 총합 (평균 계산용)
 }
 
 // RiotAPIClient는 라이엇 API와 상호작용하는 구조체
@@ -242,7 +242,7 @@ func CheckForAbusing(matchesColl *mongo.Collection, targetPUUID string) ([]strin
 		}
 
 		// Riot API 응답에서 kills, deaths, assists는 float64로 올 수 있음
-		targetKills := float64(targetStats["kills"].(float64)) 
+		targetKills := float64(targetStats["kills"].(float64))
 		targetDeaths := float64(targetStats["deaths"].(float64))
 		targetAssists := float64(targetStats["assists"].(float64))
 
@@ -276,7 +276,7 @@ func CheckForAbusing(matchesColl *mongo.Collection, targetPUUID string) ([]strin
 				}
 				// 상대방과 만났을 때의 KDA 누적
 				currentOpponentStats.TotalKDAAgainst += targetKDA
-				
+
 				// "상대에게 몇 번 죽었는지"는 Riot API의 Match Timeline (별도 API)이
 				// 필요하므로 Match History API만으로는 정확한 구현이 어렵습니다.
 				// 여기서는 이 정보를 직접 추적하지 않습니다.
@@ -287,7 +287,7 @@ func CheckForAbusing(matchesColl *mongo.Collection, targetPUUID string) ([]strin
 
 	// 3. 집계된 통계를 기반으로 어뷰징 패턴 분석 (임계값 설정)
 	const MIN_MATCHES_FOR_DETAILED_ANALYSIS = 5 // 최소 5번 이상 만나야 상세 분석 시작
-	const MAX_AVG_KDA_AGAINST_OPPONENT = 0.5  // 특정 상대에게 평균 KDA가 0.5 이하면 의심 (고의 패배 가능성)
+	const MAX_AVG_KDA_AGAINST_OPPONENT = 0.5    // 특정 상대에게 평균 KDA가 0.5 이하면 의심 (고의 패배 가능성)
 	const MIN_LOSS_RATIO_AGAINST_OPPONENT = 0.8 // 특정 상대에게 80% 이상 졌으면 의심 (고의 패배 가능성)
 
 	for _, stats := range opponentStats {
@@ -296,7 +296,7 @@ func CheckForAbusing(matchesColl *mongo.Collection, targetPUUID string) ([]strin
 			lossRatio := float64(stats.LossesAgainst) / float64(stats.MatchesMet)
 
 			// 규칙 1: 특정 상대에게 KDA가 비정상적으로 낮은 경우
-			if avgKDA <= MAX_AVG_KDA_AGAINST_OPPONENT {
+			if avgKDA <= MAX_AVG_KDA_AGAINT_OPPONENT {
 				suspiciousFindings = append(suspiciousFindings,
 					fmt.Sprintf("상대 PUUID: %s, 대전 횟수: %d회, 플레이어 평균 KDA: %.2f (임계값 %.2f 이하로 매우 낮음 - 고의 패배 의심)",
 						stats.PUUID, stats.MatchesMet, avgKDA, MAX_AVG_KDA_AGAINST_OPPONENT))
@@ -321,7 +321,7 @@ func main() {
 	// ---------------------------------------------------------------------
 	// 1. 환경 변수 설정: Riot API 키 및 MongoDB URI
 	// ---------------------------------------------------------------------
-	
+
 	// Riot API 키를 환경 변수에서 가져옵니다. (보안상 코드에 직접 입력하지 마세요!)
 	// 실행 전 터미널에서 'export RIOT_API_KEY="YOUR_RIOT_API_KEY"' (Linux/macOS)
 	// 또는 '$env:RIOT_API_KEY="YOUR_RIOT_API_KEY"' (PowerShell)로 설정해야 합니다.
@@ -377,20 +377,25 @@ func main() {
 	// ---------------------------------------------------------------------
 	router := gin.Default() // Gin 라우터 인스턴스 생성 (기본 미들웨어 포함)
 
-	 // 
-     // --- 여기에 CORS 미들웨어 설정을 추가합니다! ---
-    router.Use(func(c *gin.Context) {
-        cors.New(cors.Options{
-            AllowedOrigins: []string{"http://localhost:5173"}, // React 앱의 정확한 URL
-            AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-            AllowedHeaders: []string{"Origin", "Content-Type", "Accept"},
-            AllowCredentials: true,
-            MaxAge: 300, // 5분
-        }).Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            c.Next()
-        })).ServeHTTP(c.Writer, c.Request)
-    })
-    // --- CORS 미들웨어 설정 끝 ---
+	// ----------------------------------------------------
+	// 올바른 CORS 미들웨어 설정 (기존 CORS 코드와 교체)
+	// ----------------------------------------------------
+	corsConfig := cors.DefaultConfig()
+
+	// 중요: Vercel에 배포된 프론트엔드의 실제 URL로 바꿔주세요!
+	// 로컬 개발용 URL도 포함시켜 두는 것이 좋습니다.
+	corsConfig.AllowedOrigins = []string{
+		"http://localhost:5173", // 로컬 React 개발 서버 URL
+		"https://valorant-abusing-frontend.vercel.app/", // **여기에 당신의 Vercel 프론트엔드 URL을 입력하세요!**
+		// 예시: "https://valorant-abusing-detector-frontend.vercel.app"
+	}
+	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"} // 필요한 헤더 추가 (Authorization 같은 헤더도 추가해두면 좋습니다)
+	corsConfig.AllowCredentials = true // 쿠키/인증 정보 전송 허용
+	corsConfig.MaxAge = 300 // 5분 (프리플라이트 요청 캐싱 시간)
+
+	router.Use(cors.New(corsConfig)) // Gin에 CORS 미들웨어 적용
+	// ----------------------------------------------------
 
 
 	// Health Check 엔드포인트
@@ -433,7 +438,7 @@ func main() {
 	// 예시 URL: http://localhost:8080/player/matches/YOUR_PUUID?count=20
 	// ---------------------------------------------------------------------
 	router.GET("/player/matches/:puuid", func(c *gin.Context) {
-		puuid := c.Param("puuid")                 // URL 경로 파라미터에서 PUUID 가져오기
+		puuid := c.Param("puuid")           // URL 경로 파라미터에서 PUUID 가져오기
 		countStr := c.DefaultQuery("count", "5") // 쿼리 파라미터에서 가져올 경기 수 (기본값 5)
 
 		count, err := strconv.Atoi(countStr)
@@ -460,7 +465,7 @@ func main() {
 		}
 
 		processedCount := 0
-		
+
 		// 2. 각 경기 상세 정보 가져오기 및 MongoDB에 저장
 		// (주의: 현재는 순차적으로 처리하지만, 많은 경기를 처리할 때는 Go루틴을 이용한 동시 처리 고려)
 		for _, matchID := range matchIDs {
@@ -484,7 +489,7 @@ func main() {
 				log.Printf("매치 ID %s의 상세 정보 가져오기 실패: %v", matchID, err)
 				continue // 실패해도 다른 경기 계속 처리
 			}
-			
+
 			// MongoDB에 저장
 			_, err = matchesCollection.InsertOne(context.TODO(), matchDetails)
 			if err != nil {
