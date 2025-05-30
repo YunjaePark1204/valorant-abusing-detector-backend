@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	ginCors "github.com/gin-contrib/cors" // gin-contrib/cors 사용
+	ginCors "github.com/gin-contrib/cors"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-lambda-go/events"
-	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin" // <- **여기가 수정되었습니다! "github.com.com"이 아닌 "github.com"**
+	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -21,12 +21,11 @@ import (
 )
 
 // 전역 변수로 MongoDB 클라이언트와 Riot API 클라이언트 선언
-// 전역 변수로 MongoDB 클라이언트와 Riot API 클라이언트 선언
 var (
-	mongoClient   *mongo.Client 
-	riotAPIKey    string        
+	mongoClient   *mongo.Client
+	riotAPIKey    string
 	riotAPIClient *http.Client
-	ginLambda     *ginadapter.GinLambda 
+	ginLambda     *ginadapter.GinLambda // Gin 어댑터 인스턴스
 )
 
 // init 함수: 서버리스 함수가 콜드 스타트될 때 한 번만 실행됩니다.
@@ -66,7 +65,7 @@ func init() {
 	// ----------------------------------------------------
 	// CORS 미들웨어 설정 (gin-contrib/cors로 변경!)
 	// ----------------------------------------------------
-	corsConfig := ginCors.DefaultConfig() // ginCors (새로운 임포트 별칭) 사용
+	corsConfig := ginCors.DefaultConfig()
 	corsConfig.AllowOrigins = []string{
 		"http://localhost:5173", // 로컬 개발 서버 URL
 		"https://valorant-abusing-frontend-nl2zoffma-park-yunjaes-projects.vercel.app", // **여기에 당신의 Vercel 프론트엔드 URL을 정확히 입력하세요!**
@@ -75,7 +74,7 @@ func init() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
 	corsConfig.AllowCredentials = true
 	corsConfig.MaxAge = 300
-	r.Use(ginCors.New(corsConfig)) // ginCors.New(corsConfig)는 바로 gin.HandlerFunc를 반환합니다.
+	r.Use(ginCors.New(corsConfig))
 	// ----------------------------------------------------
 
 	// ----------------------------------------------------
@@ -168,13 +167,17 @@ func init() {
 	log.Println("서버리스 함수 초기화 완료.")
 }
 
-// Vercel(Lambda)에서 호출될 실제 핸들러 함수
-// 이 함수가 모든 HTTP 요청을 Gin 라우터로 전달합니다.
+// 기존 Handler 함수는 이제 필요 없으므로 제거하거나 주석 처리합니다.
+/*
 func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	return ginLambda.ProxyWithContext(ctx, req)
 }
+*/
 
 // main 함수: Vercel(Lambda) 런타임에 핸들러 등록
 func main() {
-	lambda.Start(Handler)
+    // lambda.Start 안에 익명 함수로 GinLambda 핸들러 로직을 직접 넣습니다.
+	lambda.Start(func(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+		return ginLambda.ProxyWithContext(ctx, req)
+	})
 }
