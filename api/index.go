@@ -2,30 +2,22 @@ package main
 
 import (
 	"context"
-	"encoding/json" // JSON 처리 패키지
+	"encoding/json"
 	"log"
-	"net/http" // HTTP 관련 기능 (중복 제거 후 하나만 남김)
+	"net/http"
 	"os"
 	"time"
 
-	// Gin 및 CORS 미들웨어
 	"github.com/gin-gonic/gin"
-	"github.com/rs/cors" // CORS 미들웨어 패키지
+	ginCors "github.com/gin-contrib/cors" // gin-contrib/cors 사용
 
-	// Lambda 호환성 라이브러리 (Gin을 Lambda에 연결)
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-lambda-go/events" // Lambda 이벤트 객체 (req, resp 타입) 임포트 추가!
-	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/ginlambda"
+	"github.com/aws/aws-lambda-go/events"
+	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin" // <- **여기가 수정되었습니다! "github.com.com"이 아닌 "github.com"**
 
-	// 당신의 기존 MongoDB 관련 코드 임포트
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-
-	// TODO: 만약 당신의 프로젝트에 다른 로컬 패키지(예: services, models 등)가 있다면
-	// go.mod에 명시된 모듈 경로를 사용하여 여기에 추가해야 합니다.
-	// 예시: "your_module_path/services"
-	// 예시: "your_module_path/models"
 )
 
 // 전역 변수로 MongoDB 클라이언트와 Riot API 클라이언트 선언
@@ -71,10 +63,10 @@ func init() {
 	r := gin.Default() // 기본 로거와 복구 미들웨어 포함
 
 	// ----------------------------------------------------
-	// CORS 미들웨어 설정 (Vercel 프론트엔드 URL로 변경!)
+	// CORS 미들웨어 설정 (gin-contrib/cors로 변경!)
 	// ----------------------------------------------------
-	corsConfig := cors.DefaultConfig() // `cors.DefaultConfig`는 이제 잘 인식될 것입니다.
-	corsConfig.AllowedOrigins = []string{
+	corsConfig := ginCors.DefaultConfig() // ginCors (새로운 임포트 별칭) 사용
+	corsConfig.AllowOrigins = []string{
 		"http://localhost:5173", // 로컬 개발 서버 URL
 		"https://valorant-abusing-frontend-nl2zoffma-park-yunjaes-projects.vercel.app", // **여기에 당신의 Vercel 프론트엔드 URL을 정확히 입력하세요!**
 	}
@@ -82,12 +74,11 @@ func init() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
 	corsConfig.AllowCredentials = true
 	corsConfig.MaxAge = 300
-	r.Use(cors.New(corsConfig).Handler()) // <- cors.New(corsConfig) 뒤에 .Handler() 추가!
+	r.Use(ginCors.New(corsConfig)) // ginCors.New(corsConfig)는 바로 gin.HandlerFunc를 반환합니다.
 	// ----------------------------------------------------
 
 	// ----------------------------------------------------
 	// 여기에 당신의 기존 Gin 라우터들을 등록합니다.
-	// 당신의 main.go에 있던 router.GET, router.POST 등등을 그대로 가져옵니다.
 	// ----------------------------------------------------
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
