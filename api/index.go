@@ -21,11 +21,12 @@ import (
 )
 
 // 전역 변수로 MongoDB 클라이언트와 Riot API 클라이언트 선언
+// 전역 변수로 MongoDB 클라이언트와 Riot API 클라이언트 선언
 var (
-	mongoClient   *mongo.Client
-	riotAPIKey    string
+	mongoClient   *mongo.Client 
+	riotAPIKey    string        
 	riotAPIClient *http.Client
-	ginLambda     *ginadapter.GinLambda // Gin 어댑터 인스턴스
+	ginLambda     *ginadapter.GinLambda 
 )
 
 // init 함수: 서버리스 함수가 콜드 스타트될 때 한 번만 실행됩니다.
