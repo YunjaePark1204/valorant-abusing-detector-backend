@@ -171,7 +171,6 @@ func init() {
 // Vercel(Lambda)에서 호출될 실제 핸들러 함수
 // 이 함수가 모든 HTTP 요청을 Gin 라우터로 전달합니다.
 func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	// GinLambda 핸들러를 사용하여 요청 처리
 	return ginLambda.ProxyWithContext(ctx, req)
 }
 
