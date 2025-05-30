@@ -21,6 +21,7 @@ import (
 )
 
 // 전역 변수로 MongoDB 클라이언트와 Riot API 클라이언트 선언
+// init 함수가 사라지므로, 여기에 변수들을 선언합니다.
 var (
 	mongoClient   *mongo.Client
 	riotAPIKey    string
@@ -28,10 +29,20 @@ var (
 	ginLambda     *ginadapter.GinLambda // Gin 어댑터 인스턴스
 )
 
-// init 함수: 서버리스 함수가 콜드 스타트될 때 한 번만 실행됩니다.
-// 여기서 MongoDB 연결 및 Riot API 키 설정을 초기화합니다.
+// 기존 init 함수는 삭제됩니다.
+/*
 func init() {
+    // ... init 함수의 모든 내용이 main 함수로 이동합니다 ...
+}
+*/
+
+// main 함수: 이제 모든 초기화 및 람다 시작을 여기서 처리합니다.
+func main() {
 	log.Println("서버리스 함수 초기화 시작...")
+
+	// ----------------------------------------------------
+	// 이전 init 함수의 내용이 여기에 통합됩니다.
+	// ----------------------------------------------------
 
 	// MongoDB 연결
 	mongoURI := os.Getenv("MONGO_URI")
@@ -62,9 +73,7 @@ func init() {
 	// Gin 라우터 설정
 	r := gin.Default() // 기본 로거와 복구 미들웨어 포함
 
-	// ----------------------------------------------------
-	// CORS 미들웨어 설정 (gin-contrib/cors로 변경!)
-	// ----------------------------------------------------
+	// CORS 미들웨어 설정
 	corsConfig := ginCors.DefaultConfig()
 	corsConfig.AllowOrigins = []string{
 		"http://localhost:5173", // 로컬 개발 서버 URL
@@ -75,11 +84,8 @@ func init() {
 	corsConfig.AllowCredentials = true
 	corsConfig.MaxAge = 300
 	r.Use(ginCors.New(corsConfig))
-	// ----------------------------------------------------
 
-	// ----------------------------------------------------
-	// 여기에 당신의 기존 Gin 라우터들을 등록합니다.
-	// ----------------------------------------------------
+	// 기존 Gin 라우터들을 등록
 	r.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
@@ -165,18 +171,10 @@ func init() {
 	// Gin 라우터를 Lambda 어댑터에 연결
 	ginLambda = ginadapter.New(r)
 	log.Println("서버리스 함수 초기화 완료.")
-}
 
-// 기존 Handler 함수는 이제 필요 없으므로 제거하거나 주석 처리합니다.
-/*
-func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	return ginLambda.ProxyWithContext(ctx, req)
-}
-*/
-
-// main 함수: Vercel(Lambda) 런타임에 핸들러 등록
-func main() {
-    // lambda.Start 안에 익명 함수로 GinLambda 핸들러 로직을 직접 넣습니다.
+	// ----------------------------------------------------
+	// 이제 lambda.Start를 호출하여 핸들러를 시작합니다.
+	// ----------------------------------------------------
 	lambda.Start(func(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 		return ginLambda.ProxyWithContext(ctx, req)
 	})
