@@ -2,23 +2,30 @@ package main
 
 import (
 	"context"
+	"encoding/json" // JSON 처리 패키지
 	"log"
+	"net/http" // HTTP 관련 기능 (중복 제거 후 하나만 남김)
 	"os"
 	"time"
 
 	// Gin 및 CORS 미들웨어
 	"github.com/gin-gonic/gin"
-	"github.com/rs/cors"
+	"github.com/rs/cors" // CORS 미들웨어 패키지
 
-	// Lambda 호환성 라이브러리
+	// Lambda 호환성 라이브러리 (Gin을 Lambda에 연결)
 	"github.com/aws/aws-lambda-go/lambda"
-	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/gin"
+	"github.com/aws/aws-lambda-go/events" // Lambda 이벤트 객체 (req, resp 타입) 임포트 추가!
+	ginadapter "github.com/awslabs/aws-lambda-go-api-proxy/ginlambda"
 
-	// 당신의 기존 코드 임포트
+	// 당신의 기존 MongoDB 관련 코드 임포트
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/bson"
-	"net/http" // HTTP 상태 코드 사용 등
+
+	// TODO: 만약 당신의 프로젝트에 다른 로컬 패키지(예: services, models 등)가 있다면
+	// go.mod에 명시된 모듈 경로를 사용하여 여기에 추가해야 합니다.
+	// 예시: "your_module_path/services"
+	// 예시: "your_module_path/models"
 )
 
 // 전역 변수로 MongoDB 클라이언트와 Riot API 클라이언트 선언
@@ -26,7 +33,7 @@ var (
 	mongoClient   *mongo.Client
 	riotAPIKey    string
 	riotAPIClient *http.Client
-	ginLambda     *ginadapter.GinLambda # Gin 어댑터 인스턴스
+	ginLambda     *ginadapter.GinLambda // Gin 어댑터 인스턴스
 )
 
 // init 함수: 서버리스 함수가 콜드 스타트될 때 한 번만 실행됩니다.
@@ -66,7 +73,7 @@ func init() {
 	// ----------------------------------------------------
 	// CORS 미들웨어 설정 (Vercel 프론트엔드 URL로 변경!)
 	// ----------------------------------------------------
-	corsConfig := cors.DefaultConfig()
+	corsConfig := cors.DefaultConfig() // `cors.DefaultConfig`는 이제 잘 인식될 것입니다.
 	corsConfig.AllowedOrigins = []string{
 		"http://localhost:5173", // 로컬 개발 서버 URL
 		"https://valorant-abusing-frontend-nl2zoffma-park-yunjaes-projects.vercel.app", // **여기에 당신의 Vercel 프론트엔드 URL을 정확히 입력하세요!**
@@ -75,7 +82,7 @@ func init() {
 	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
 	corsConfig.AllowCredentials = true
 	corsConfig.MaxAge = 300
-	r.Use(cors.New(corsConfig))
+	r.Use(cors.New(corsConfig).Handler()) // <- cors.New(corsConfig) 뒤에 .Handler() 추가!
 	// ----------------------------------------------------
 
 	// ----------------------------------------------------
@@ -160,8 +167,8 @@ func init() {
 		c.JSON(http.StatusOK, apiResponse)
 	})
 
-    // TODO: '/player/matches/:puuid' 라우터도 여기에 추가해야 합니다.
-    // 기존 main.go의 해당 라우터 코드를 이리로 옮기세요.
+	// TODO: '/player/matches/:puuid' 라우터도 여기에 추가해야 합니다.
+	// 기존 main.go의 해당 라우터 코드를 이리로 옮기세요.
 	// r.GET("/player/matches/:puuid", func(c *gin.Context) { ... })
 
 	// Gin 라우터를 Lambda 어댑터에 연결
