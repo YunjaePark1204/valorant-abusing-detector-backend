@@ -172,11 +172,29 @@ func init() {
 // Vercel(Lambda)에서 호출될 실제 핸들러 함수
 // 이 함수가 모든 HTTP 요청을 Gin 라우터로 전달합니다.
 // main 함수가 없으므로 이 Handler 함수가 Vercel 런타임에 의해 직접 호출됩니다.
+// 기존 코드
+// func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+//     // GinLambda 핸들러를 사용하여 요청 처리
+//     // ginLambda는 init() 함수에서 이미 초기화되었습니다.
+//     return ginLambda.ProxyWithContext(ctx, req)
+// }
+
+// TEST =========================
 func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	// GinLambda 핸들러를 사용하여 요청 처리
-	// ginLambda는 init() 함수에서 이미 초기화되었습니다.
-	return ginLambda.ProxyWithContext(ctx, req)
+    resp, err := ginLambda.ProxyWithContext(ctx, req)
+
+    // 수동으로 CORS 헤더 강제 삽입 (Netlify + Proxy 환경 대응)
+    if resp.Headers == nil {
+        resp.Headers = map[string]string{}
+    }
+    resp.Headers["Access-Control-Allow-Origin"] = "https://valorant-abusing-frontend.vercel.app"
+    resp.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    resp.Headers["Access-Control-Allow-Headers"] = "Origin, Content-Type, Accept, Authorization"
+    resp.Headers["Access-Control-Allow-Credentials"] = "true"
+
+    return resp, err
 }
+// ======================
 
 // main 함수는 완전히 제거됩니다.
 /*
