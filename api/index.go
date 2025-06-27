@@ -77,7 +77,7 @@ func init() {
     r.Use(ginCors.New(corsConfig))
 
     // CORS 용 OPTIONS 라우팅 추가 
-    r.OPTIONS("/path", func(cgin.Context) {
+    r.OPTIONS("/*path", func(c *gin.Context) {
     c.Status(http.StatusOK)
 })
 
