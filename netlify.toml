@@ -5,7 +5,9 @@ toml [build]
 [functions]
   directory = "functions"
   node_bundler = "esbuild"
+  external_node_modules = []
   included_files = []
+  # go_version = "1.22" # 필요하다면 이 줄의 주석을 해제하고 Go 버전을 지정하세요.
 
 [[redirects]]
   from = "/api/*"
