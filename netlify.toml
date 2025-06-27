@@ -1,4 +1,4 @@
-toml [build]
+[build]
   command = "echo 'No main build command needed for Go Functions'"
   publish = "public"
 
