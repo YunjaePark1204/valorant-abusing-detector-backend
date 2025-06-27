@@ -63,24 +63,24 @@ func init() {
 	// Gin 라우터 설정
 	r := gin.Default() // 기본 로거와 복구 미들웨어 포함
 // CORS 미들웨어 설정
-	corsConfig := ginCors.DefaultConfig()
-    corsConfig.AllowOrigins = []string{
-        "http://localhost:5173/", // 로컬 개발 서버 URL
+//	corsConfig := ginCors.DefaultConfig()
+//    corsConfig.AllowOrigins = []string{
+//        "http://localhost:5173/", // 로컬 개발 서버 URL
 
         // =========== test
         // 슬래시 제거
-        "https://valorant-abusing-frontend.vercel.app/", // 여기에 당신의 Vercel 프론트엔드 URL을 정확히 입력하세요!
-    }
-    corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-    corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
-    corsConfig.AllowCredentials = true
-    corsConfig.MaxAge = 300
-    r.Use(ginCors.New(corsConfig))
+//        "https://valorant-abusing-frontend.vercel.app/", // 여기에 당신의 Vercel 프론트엔드 URL을 정확히 입력하세요!
+//    }
+//    corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
+//    corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+//    corsConfig.AllowCredentials = true
+//    corsConfig.MaxAge = 300
+//    r.Use(ginCors.New(corsConfig))
 
     // CORS 용 OPTIONS 라우팅 추가 
-    r.OPTIONS("/*path", func(c *gin.Context) {
-    c.Status(http.StatusOK)
-})
+//    r.OPTIONS("/*path", func(c *gin.Context) {
+//    c.Status(http.StatusOK)
+//})
 
 	// 기존 Gin 라우터들을 등록
 	r.GET("/ping", func(c *gin.Context) {
