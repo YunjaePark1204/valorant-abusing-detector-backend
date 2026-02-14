@@ -1,4 +1,3 @@
-// 1. 패키지명을 main에서 handler로 변경합니다.
 package handler
 
 import (
@@ -6,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"time"
@@ -24,9 +22,8 @@ var (
 	router       *gin.Engine
 )
 
-// init 함수는 Vercel 서버리스 함수가 로드될 때 한 번 실행됩니다.
 func init() {
-	// MongoDB 연결
+	// 1. MongoDB 초기화
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI != "" {
 		clientOptions := options.Client().ApplyURI(mongoURI)
@@ -37,16 +34,16 @@ func init() {
 		}
 	}
 
-	// Henrik API 키 설정
+	// 2. Henrik API 키 설정
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
 	httpClient = &http.Client{Timeout: 15 * time.Second}
 
-	// Gin 라우터 설정
+	// 3. Gin 라우터 설정
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	// Vercel의 rewrites 설정에 맞게 경로를 구성합니다.
+	// 라우트 등록
 	r.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
@@ -57,13 +54,12 @@ func init() {
 	router = r
 }
 
-// 2. Vercel이 진입점으로 사용하는 Handler 함수입니다.
-// 반드시 함수 이름 첫 글자가 대문자(Handler)여야 내보내기(Export)가 됩니다.
+// Vercel이 호출하는 실제 핸들러 함수
 func Handler(w http.ResponseWriter, r *http.Request) {
 	router.ServeHTTP(w, r)
 }
 
-// --- 아래는 기존 로직과 동일합니다 ---
+// --- 핸들러 함수들 ---
 
 func getAccount(c *gin.Context) {
 	name := c.Query("gameName")
@@ -94,10 +90,15 @@ func getAccount(c *gin.Context) {
 
 	var apiRes map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&apiRes)
-	userData := apiRes["data"].(map[string]interface{})
+	
+	data, ok := apiRes["data"].(map[string]interface{})
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "데이터를 찾을 수 없습니다."})
+		return
+	}
 
-	col.InsertOne(context.Background(), userData)
-	c.JSON(http.StatusOK, userData)
+	col.InsertOne(context.Background(), data)
+	c.JSON(http.StatusOK, data)
 }
 
 func getMatches(c *gin.Context) {
@@ -147,8 +148,10 @@ func CheckForAbusing(matches []map[string]interface{}, targetPUUID string) []str
 			}
 		}
 
-		teams := m["teams"].(map[string]interface{})
-		teamKey := "red"; if targetTeam == "Blue" { teamKey = "blue" }
+		teams, ok := m["teams"].(map[string]interface{})
+		if !ok { continue }
+		teamKey := "red"
+		if targetTeam == "Blue" { teamKey = "blue" }
 		teamInfo, ok := teams[teamKey].(map[string]interface{})
 		if !ok { continue }
 		won := teamInfo["has_won"].(bool)
