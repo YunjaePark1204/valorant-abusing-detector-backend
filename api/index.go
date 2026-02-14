@@ -23,27 +23,26 @@ var (
 )
 
 func init() {
-	// 1. MongoDB 초기화
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		clientOptions := options.Client().ApplyURI(mongoURI)
-		var err error
-		mongoClient, err = mongo.Connect(context.Background(), clientOptions)
-		if err != nil {
-			log.Printf("MongoDB 연결 실패: %v", err)
+		client, err := mongo.Connect(ctx, clientOptions)
+		if err == nil {
+			mongoClient = client
+		} else {
+			log.Printf("MongoDB 연결 초기 실패: %v", err)
 		}
 	}
 
-	// 2. Henrik API 키 설정
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
 	httpClient = &http.Client{Timeout: 15 * time.Second}
 
-	// 3. Gin 라우터 설정
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(gin.Recovery()) // 패닉 발생 시 서버 종료 대신 500 에러 반환
 
-	// 라우트 등록
 	r.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
@@ -54,12 +53,9 @@ func init() {
 	router = r
 }
 
-// Vercel이 호출하는 실제 핸들러 함수
 func Handler(w http.ResponseWriter, r *http.Request) {
 	router.ServeHTTP(w, r)
 }
-
-// --- 핸들러 함수들 ---
 
 func getAccount(c *gin.Context) {
 	name := c.Query("gameName")
@@ -67,6 +63,12 @@ func getAccount(c *gin.Context) {
 
 	if name == "" || tag == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "gameName과 tagLine이 필요합니다."})
+		return
+	}
+
+	// mongoClient가 nil인지 확인
+	if mongoClient == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "데이터베이스 연결 안 됨"})
 		return
 	}
 
@@ -83,22 +85,25 @@ func getAccount(c *gin.Context) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil || resp.StatusCode != 200 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "API 호출 실패"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "라이엇 계정 정보를 가져오지 못했습니다."})
 		return
 	}
 	defer resp.Body.Close()
 
 	var apiRes map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&apiRes)
+	if err := json.NewDecoder(resp.Body).Decode(&apiRes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "응답 파싱 실패"})
+		return
+	}
 	
-	data, ok := apiRes["data"].(map[string]interface{})
+	userData, ok := apiRes["data"].(map[string]interface{})
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "데이터를 찾을 수 없습니다."})
+		c.JSON(http.StatusNotFound, gin.H{"error": "플레이어를 찾을 수 없습니다."})
 		return
 	}
 
-	col.InsertOne(context.Background(), data)
-	c.JSON(http.StatusOK, data)
+	col.InsertOne(context.Background(), userData)
+	c.JSON(http.StatusOK, userData)
 }
 
 func getMatches(c *gin.Context) {
@@ -111,13 +116,16 @@ func getMatches(c *gin.Context) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil || resp.StatusCode != 200 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터 로드 실패"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터를 가져오지 못했습니다."})
 		return
 	}
 	defer resp.Body.Close()
 
 	var res struct { Data []map[string]interface{} `json:"data"` }
-	json.NewDecoder(resp.Body).Decode(&res)
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터 파싱 실패"})
+		return
+	}
 
 	findings := CheckForAbusing(res.Data, puuid)
 
@@ -141,9 +149,10 @@ func CheckForAbusing(matches []map[string]interface{}, targetPUUID string) []str
 
 		var targetTeam string
 		for _, p := range allPlayers {
-			player := p.(map[string]interface{})
-			if player["puuid"] == targetPUUID {
-				targetTeam = player["team"].(string)
+			player, ok := p.(map[string]interface{})
+			if !ok { continue }
+			if p_puuid, ok := player["puuid"].(string); ok && p_puuid == targetPUUID {
+				targetTeam, _ = player["team"].(string)
 				break
 			}
 		}
@@ -152,18 +161,23 @@ func CheckForAbusing(matches []map[string]interface{}, targetPUUID string) []str
 		if !ok { continue }
 		teamKey := "red"
 		if targetTeam == "Blue" { teamKey = "blue" }
+		
 		teamInfo, ok := teams[teamKey].(map[string]interface{})
 		if !ok { continue }
-		won := teamInfo["has_won"].(bool)
+		
+		won, _ := teamInfo["has_won"].(bool)
 
 		for _, p := range allPlayers {
-			opp := p.(map[string]interface{})
-			if opp["puuid"] == targetPUUID || opp["team"] == targetTeam { continue }
+			opp, ok := p.(map[string]interface{})
+			if !ok { continue }
+			oppPUUID, _ := opp["puuid"].(string)
+			oppTeam, _ := opp["team"].(string)
+
+			if oppPUUID == targetPUUID || oppTeam == targetTeam { continue }
 			
-			id := opp["puuid"].(string)
-			if _, ok := opponents[id]; !ok { opponents[id] = &stats{} }
-			opponents[id].met++
-			if !won { opponents[id].lost++ }
+			if _, ok := opponents[oppPUUID]; !ok { opponents[oppPUUID] = &stats{} }
+			opponents[oppPUUID].met++
+			if !won { opponents[oppPUUID].lost++ }
 		}
 	}
 
