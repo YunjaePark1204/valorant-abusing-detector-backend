@@ -98,22 +98,31 @@ func getAccount(c *gin.Context) {
 	name := c.Query("gameName")
 	tag := c.Query("tagLine")
 
+	log.Printf("[getAccount] 요청 받음 - gameName: %s, tagLine: %s", name, tag)
+
 	if name == "" || tag == "" {
+		log.Printf("[getAccount] 에러: 파라미터 누락")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "gameName과 tagLine이 필요합니다."})
 		return
 	}
 
 	if mongoClient == nil {
+		log.Printf("[getAccount] 에러: mongoClient가 nil입니다")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB 연결 실패"})
 		return
 	}
+	
+	log.Printf("[getAccount] mongoClient 정상, 데이터베이스 접근 시도")
 
 	col := mongoClient.Database("valorant_abusing_detector").Collection("players")
 	var result map[string]interface{}
 	if err := col.FindOne(context.Background(), bson.M{"name": name, "tag": tag}).Decode(&result); err == nil {
+		log.Printf("[getAccount] 캐시에서 데이터 찾음: %s/%s", name, tag)
 		c.JSON(http.StatusOK, result)
 		return
 	}
+	
+	log.Printf("[getAccount] 캐시에 없음, Henrik API 호출")
 
 	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v1/account/%s/%s", name, tag)
 	req, _ := http.NewRequest("GET", url, nil)
