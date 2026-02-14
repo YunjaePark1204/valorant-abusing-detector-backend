@@ -56,8 +56,18 @@ func init() {
 
 // Vercel 진입점 핸들러 (CORS 직접 처리)
 func Handler(w http.ResponseWriter, r *http.Request) {
-	// CORS 헤더 설정
-	w.Header().Set("Access-Control-Allow-Origin", "https://valorant-abusing-frontend.vercel.app")
+	// 허용할 origin 리스트 (프로덕션 및 개발용)
+	allowedOrigins := map[string]bool{
+		"https://valorant-abusing-frontend.vercel.app": true,
+		"http://localhost:5173": true,
+		"http://localhost:3000": true,
+	}
+
+	// 요청의 origin 확인 후 CORS 헤더 설정
+	origin := r.Header.Get("Origin")
+	if allowedOrigins[origin] {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+	}
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -97,14 +107,24 @@ func getAccount(c *gin.Context) {
 	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
 	resp, err := httpClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil {
+		log.Printf("Henrik API 요청 실패: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "라이엇 계정 정보 조회 실패"})
+		return
+	}
+	if resp.StatusCode != 200 {
+		log.Printf("Henrik API 오류 상태: %d", resp.StatusCode)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "라이엇 계정 정보 조회 실패"})
 		return
 	}
 	defer resp.Body.Close()
 
 	var apiRes map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&apiRes)
+	if err := json.NewDecoder(resp.Body).Decode(&apiRes); err != nil {
+		log.Printf("JSON 디코딩 실패: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "응답 처리 실패"})
+		return
+	}
 	
 	userData, ok := apiRes["data"].(map[string]interface{})
 	if !ok {
@@ -113,7 +133,13 @@ func getAccount(c *gin.Context) {
 	}
 
 	col.InsertOne(context.Background(), userData)
-	c.JSON(http.StatusOK, userData)
+	// 응답에 puuid 포함하여 프론트엔드에서 쉽게 접근 가능하게 함
+	c.JSON(http.StatusOK, gin.H{
+		"puuid": userData["puuid"],
+		"name": userData["name"],
+		"tag": userData["tag"],
+		"data": userData,
+	})
 }
 
 func getMatches(c *gin.Context) {
