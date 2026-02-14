@@ -1,4 +1,5 @@
-package main
+// 1. 패키지명을 main에서 handler로 변경합니다.
+package handler
 
 import (
 	"context"
@@ -20,15 +21,14 @@ var (
 	mongoClient  *mongo.Client
 	henrikAPIKey string
 	httpClient   *http.Client
-	router       *gin.Engine // Gin 엔진을 전역으로 선언
+	router       *gin.Engine
 )
 
+// init 함수는 Vercel 서버리스 함수가 로드될 때 한 번 실행됩니다.
 func init() {
-	// 1. MongoDB 초기화
+	// MongoDB 연결
 	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		log.Println("경고: MONGO_URI가 설정되지 않았습니다.")
-	} else {
+	if mongoURI != "" {
 		clientOptions := options.Client().ApplyURI(mongoURI)
 		var err error
 		mongoClient, err = mongo.Connect(context.Background(), clientOptions)
@@ -37,16 +37,16 @@ func init() {
 		}
 	}
 
-	// 2. HenrikDev API 및 HTTP 클라이언트 설정
+	// Henrik API 키 설정
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
 	httpClient = &http.Client{Timeout: 15 * time.Second}
 
-	// 3. Gin 라우터 설정
+	// Gin 라우터 설정
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	// 라우트 등록
+	// Vercel의 rewrites 설정에 맞게 경로를 구성합니다.
 	r.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
@@ -57,13 +57,13 @@ func init() {
 	router = r
 }
 
-// Vercel이 호출하는 실제 핸들러 함수 (표준 http.HandlerFunc 시그니처)
+// 2. Vercel이 진입점으로 사용하는 Handler 함수입니다.
+// 반드시 함수 이름 첫 글자가 대문자(Handler)여야 내보내기(Export)가 됩니다.
 func Handler(w http.ResponseWriter, r *http.Request) {
-	// 모든 요청을 Gin 라우터로 전달
 	router.ServeHTTP(w, r)
 }
 
-// --- 핸들러 함수들 ---
+// --- 아래는 기존 로직과 동일합니다 ---
 
 func getAccount(c *gin.Context) {
 	name := c.Query("gameName")
