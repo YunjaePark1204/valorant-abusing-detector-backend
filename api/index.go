@@ -108,7 +108,7 @@ func getAccount(c *gin.Context) {
 		return
 	}
 
-	col := mongoClient.Database("valorant").Collection("playerAccounts")
+	col := mongoClient.Database("valorant_abusing_detector").Collection("players")
 	var result map[string]interface{}
 	if err := col.FindOne(context.Background(), bson.M{"name": name, "tag": tag}).Decode(&result); err == nil {
 		c.JSON(http.StatusOK, result)
