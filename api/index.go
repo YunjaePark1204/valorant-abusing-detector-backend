@@ -30,13 +30,26 @@ func init() {
 		defer cancel()
 		clientOptions := options.Client().ApplyURI(mongoURI)
 		client, err := mongo.Connect(ctx, clientOptions)
-		if err == nil {
-			mongoClient = client
+		if err != nil {
+			log.Printf("MongoDB 연결 실패: %v", err)
+		} else {
+			// 연결 확인
+			if err := client.Ping(ctx, nil); err != nil {
+				log.Printf("MongoDB Ping 실패: %v", err)
+			} else {
+				log.Println("MongoDB 연결 성공")
+				mongoClient = client
+			}
 		}
+	} else {
+		log.Println("경고: MONGO_URI 환경변수가 설정되지 않았습니다.")
 	}
 
 	// 2. Henrik API 설정
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
+	if henrikAPIKey == "" {
+		log.Println("경고: HENRIK_API_KEY 환경변수가 설정되지 않았습니다.")
+	}
 	httpClient = &http.Client{Timeout: 15 * time.Second}
 
 	// 3. Gin 라우터 설정
@@ -146,19 +159,34 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
+	if puuid == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "puuid가 필요합니다."})
+		return
+	}
+
 	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s", region, puuid)
 	req, _ := http.NewRequest("GET", url, nil)
 	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
 	resp, err := httpClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil {
+		log.Printf("Henrik API 매치 조회 실패: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터 로드 실패"})
+		return
+	}
+	if resp.StatusCode != 200 {
+		log.Printf("Henrik API 매치 오류 상태: %d", resp.StatusCode)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터 로드 실패"})
 		return
 	}
 	defer resp.Body.Close()
 
 	var res struct { Data []map[string]interface{} `json:"data"` }
-	json.NewDecoder(resp.Body).Decode(&res)
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		log.Printf("JSON 디코딩 실패: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "응답 처리 실패"})
+		return
+	}
 
 	findings := CheckForAbusing(res.Data, puuid)
 
