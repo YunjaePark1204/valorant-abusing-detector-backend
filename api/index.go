@@ -23,6 +23,7 @@ var (
 )
 
 func init() {
+	// 1. MongoDB 초기화
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -31,29 +32,42 @@ func init() {
 		client, err := mongo.Connect(ctx, clientOptions)
 		if err == nil {
 			mongoClient = client
-		} else {
-			log.Printf("MongoDB 연결 초기 실패: %v", err)
 		}
 	}
 
+	// 2. Henrik API 설정
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
 	httpClient = &http.Client{Timeout: 15 * time.Second}
 
+	// 3. Gin 라우터 설정
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Recovery()) // 패닉 발생 시 서버 종료 대신 500 에러 반환
+	r.Use(gin.Recovery())
 
+	// 라우트 등록 (경로 앞에 /api 유지)
 	r.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
-
 	r.GET("/api/account/riotid", getAccount)
 	r.GET("/api/player/matches/:puuid", getMatches)
 
 	router = r
 }
 
+// Vercel 진입점 핸들러 (CORS 직접 처리)
 func Handler(w http.ResponseWriter, r *http.Request) {
+	// CORS 헤더 설정
+	w.Header().Set("Access-Control-Allow-Origin", "https://valorant-abusing-frontend.vercel.app")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+	// Preflight 요청 처리
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	router.ServeHTTP(w, r)
 }
 
@@ -66,9 +80,8 @@ func getAccount(c *gin.Context) {
 		return
 	}
 
-	// mongoClient가 nil인지 확인
 	if mongoClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "데이터베이스 연결 안 됨"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "DB 연결 실패"})
 		return
 	}
 
@@ -85,16 +98,13 @@ func getAccount(c *gin.Context) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil || resp.StatusCode != 200 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "라이엇 계정 정보를 가져오지 못했습니다."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "라이엇 계정 정보 조회 실패"})
 		return
 	}
 	defer resp.Body.Close()
 
 	var apiRes map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&apiRes); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "응답 파싱 실패"})
-		return
-	}
+	json.NewDecoder(resp.Body).Decode(&apiRes)
 	
 	userData, ok := apiRes["data"].(map[string]interface{})
 	if !ok {
@@ -116,16 +126,13 @@ func getMatches(c *gin.Context) {
 
 	resp, err := httpClient.Do(req)
 	if err != nil || resp.StatusCode != 200 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터를 가져오지 못했습니다."})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터 로드 실패"})
 		return
 	}
 	defer resp.Body.Close()
 
 	var res struct { Data []map[string]interface{} `json:"data"` }
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터 파싱 실패"})
-		return
-	}
+	json.NewDecoder(resp.Body).Decode(&res)
 
 	findings := CheckForAbusing(res.Data, puuid)
 
@@ -149,35 +156,26 @@ func CheckForAbusing(matches []map[string]interface{}, targetPUUID string) []str
 
 		var targetTeam string
 		for _, p := range allPlayers {
-			player, ok := p.(map[string]interface{})
-			if !ok { continue }
-			if p_puuid, ok := player["puuid"].(string); ok && p_puuid == targetPUUID {
-				targetTeam, _ = player["team"].(string)
+			player := p.(map[string]interface{})
+			if player["puuid"] == targetPUUID {
+				targetTeam = player["team"].(string)
 				break
 			}
 		}
 
-		teams, ok := m["teams"].(map[string]interface{})
-		if !ok { continue }
-		teamKey := "red"
-		if targetTeam == "Blue" { teamKey = "blue" }
-		
-		teamInfo, ok := teams[teamKey].(map[string]interface{})
-		if !ok { continue }
-		
-		won, _ := teamInfo["has_won"].(bool)
+		teams, _ := m["teams"].(map[string]interface{})
+		teamKey := "red"; if targetTeam == "Blue" { teamKey = "blue" }
+		teamInfo, _ := teams[teamKey].(map[string]interface{})
+		won := teamInfo["has_won"].(bool)
 
 		for _, p := range allPlayers {
-			opp, ok := p.(map[string]interface{})
-			if !ok { continue }
-			oppPUUID, _ := opp["puuid"].(string)
-			oppTeam, _ := opp["team"].(string)
-
-			if oppPUUID == targetPUUID || oppTeam == targetTeam { continue }
+			opp := p.(map[string]interface{})
+			if opp["puuid"] == targetPUUID || opp["team"] == targetTeam { continue }
 			
-			if _, ok := opponents[oppPUUID]; !ok { opponents[oppPUUID] = &stats{} }
-			opponents[oppPUUID].met++
-			if !won { opponents[oppPUUID].lost++ }
+			id := opp["puuid"].(string)
+			if _, ok := opponents[id]; !ok { opponents[id] = &stats{} }
+			opponents[id].met++
+			if !won { opponents[id].lost++ }
 		}
 	}
 
