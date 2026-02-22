@@ -120,16 +120,18 @@ func getMatches(c *gin.Context) {
 	var res struct { Data []map[string]interface{} `json:"data"` }
 	json.NewDecoder(resp.Body).Decode(&res)
 
-	analyzedPlayers, findings := AnalyzeMatches(res.Data, puuid)
+	analyzedPlayers, findings, histories := AnalyzeMatches(res.Data, puuid)
 
 	c.JSON(http.StatusOK, gin.H{
 		"matchesCount":    len(res.Data),
 		"abusingDetected": len(findings) > 0,
 		"details":         findings,
 		"players":         analyzedPlayers,
+		"history":         histories, // 새롭게 추가된 전적 기록
 	})
 }
 
+// 조우한 플레이어 통계
 type PlayerStat struct {
 	PUUID      string  `json:"puuid"`
 	Name       string  `json:"name"`
@@ -143,36 +145,92 @@ type PlayerStat struct {
 	Score      float64 `json:"score"`
 }
 
-func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]PlayerStat, []string) {
+// 개별 매치 요약 (전적 검색용)
+type MatchSummary struct {
+	MatchID string  `json:"matchId"`
+	Map     string  `json:"map"`
+	Mode    string  `json:"mode"`
+	Agent   string  `json:"agent"`
+	Result  string  `json:"result"`
+	Kills   float64 `json:"kills"`
+	Deaths  float64 `json:"deaths"`
+	Assists float64 `json:"assists"`
+	Score   float64 `json:"score"`
+}
+
+func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]PlayerStat, []string, []MatchSummary) {
 	statsMap := make(map[string]*PlayerStat)
 	var findings []string
+	var histories []MatchSummary
 
 	for _, m := range matches {
+		meta, ok := m["metadata"].(map[string]interface{})
+		if !ok { continue }
+		matchId, _ := meta["matchid"].(string)
+		mapName, _ := meta["map"].(string)
+		mode, _ := meta["mode"].(string)
+
 		playersData, ok := m["players"].(map[string]interface{})
 		if !ok { continue }
 		allPlayers, ok := playersData["all_players"].([]interface{})
 		if !ok { continue }
 
-		var targetTeam string
+		var targetTeam, targetAgent string
+		var targetKills, targetDeaths, targetAssists, targetScore float64
+
+		// 1. 타겟 유저 찾기 및 내 전적 추출
 		for _, p := range allPlayers {
 			player, _ := p.(map[string]interface{})
 			if pPUUID, _ := player["puuid"].(string); strings.EqualFold(pPUUID, targetPUUID) {
 				targetTeam, _ = player["team"].(string)
+				targetAgent, _ = player["character"].(string)
+				if stats, ok := player["stats"].(map[string]interface{}); ok {
+					targetKills, _ = stats["kills"].(float64)
+					targetDeaths, _ = stats["deaths"].(float64)
+					targetAssists, _ = stats["assists"].(float64)
+					targetScore, _ = stats["score"].(float64)
+				}
 				break
 			}
 		}
 
+		// 2. 승패 판정
 		teams, _ := m["teams"].(map[string]interface{})
 		targetWon := false
-		// 데스매치 등 팀이 없는 경우를 대비한 유연한 처리
-		if teams != nil {
+		resultStr := "-" // 팀 데스매치 등 무승부/판독불가 기본값
+
+		if teams != nil && targetTeam != "" {
 			teamKey := "red"
 			if strings.EqualFold(targetTeam, "Blue") { teamKey = "blue" }
 			if teamInfo, ok := teams[teamKey].(map[string]interface{}); ok {
 				targetWon, _ = teamInfo["has_won"].(bool)
+				roundsWon, _ := teamInfo["rounds_won"].(float64)
+				roundsLost, _ := teamInfo["rounds_lost"].(float64)
+				
+				if targetWon {
+					resultStr = "승리"
+				} else if roundsWon == roundsLost && roundsWon > 0 {
+					resultStr = "무승부"
+				} else {
+					resultStr = "패배"
+				}
 			}
 		}
 
+		// 내 전적 히스토리에 추가
+		histories = append(histories, MatchSummary{
+			MatchID: matchId,
+			Map:     mapName,
+			Mode:    mode,
+			Agent:   targetAgent,
+			Result:  resultStr,
+			Kills:   targetKills,
+			Deaths:  targetDeaths,
+			Assists: targetAssists,
+			Score:   targetScore,
+		})
+
+		// 3. 만난 플레이어 통계 누적
 		for _, p := range allPlayers {
 			player, ok := p.(map[string]interface{})
 			if !ok { continue }
@@ -202,7 +260,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 			s.Assists += pAssists
 			s.Score += pScore
 
-			// 팀이 있고 같으면 아군, 아니면 적군 (데스매치는 모두 적군으로 판정)
 			if pTeam != "" && strings.EqualFold(pTeam, targetTeam) { 
 				s.AsAlly++ 
 			} else { 
@@ -212,7 +269,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 		}
 	}
 
-	// 결과가 없을 경우 null 대신 빈 배열([]) 반환을 보장
 	results := make([]PlayerStat, 0)
 	for _, s := range statsMap {
 		results = append(results, *s)
@@ -224,9 +280,7 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 		}
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Met > results[j].Met
-	})
+	sort.Slice(results, func(i, j int) bool { return results[i].Met > results[j].Met })
 
-	return results, findings
+	return results, findings, histories
 }
