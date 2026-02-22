@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -106,7 +105,7 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	// 10경기를 가져오도록 size=10 파라미터 추가
+	// 10경기를 가져오도록 size=10 파라미터 유지
 	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=10", region, puuid)
 	req, _ := http.NewRequest("GET", url, nil)
 	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
