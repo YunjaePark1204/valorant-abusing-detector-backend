@@ -61,6 +61,8 @@ func init() {
 	r.GET("/api/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
+	// DB 상태 확인용 엔드포인트
+	r.GET("/api/dbstatus", dbStatus)
 	r.GET("/api/account/riotid", getAccount)
 	r.GET("/api/player/matches/:puuid", getMatches)
 
@@ -248,4 +250,32 @@ func CheckForAbusing(matches []map[string]interface{}, targetPUUID string) []str
 		}
 	}
 	return findings
+}
+
+// dbStatus returns current MongoDB connection status and players collection count
+func dbStatus(c *gin.Context) {
+	if mongoClient == nil {
+		log.Printf("[dbStatus] mongoClient is nil")
+		c.JSON(http.StatusInternalServerError, gin.H{"connected": false, "error": "mongoClient is nil"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := mongoClient.Ping(ctx, nil); err != nil {
+		log.Printf("[dbStatus] MongoDB ping failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"connected": false, "error": err.Error()})
+		return
+	}
+
+	col := mongoClient.Database("valorant_abusing_detector").Collection("players")
+	cnt, err := col.CountDocuments(ctx, bson.M{})
+	if err != nil {
+		log.Printf("[dbStatus] CountDocuments failed: %v", err)
+		c.JSON(http.StatusOK, gin.H{"connected": true, "countError": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"connected": true, "playersCount": cnt})
 }
