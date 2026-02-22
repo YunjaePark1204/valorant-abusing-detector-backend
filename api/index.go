@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -105,7 +106,6 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	// 10경기를 가져오도록 size=10 파라미터 유지
 	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=10", region, puuid)
 	req, _ := http.NewRequest("GET", url, nil)
 	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
@@ -130,7 +130,6 @@ func getMatches(c *gin.Context) {
 	})
 }
 
-// 프론트엔드에 전달할 상세 통계 구조체
 type PlayerStat struct {
 	PUUID      string  `json:"puuid"`
 	Name       string  `json:"name"`
@@ -157,23 +156,28 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 		var targetTeam string
 		for _, p := range allPlayers {
 			player, _ := p.(map[string]interface{})
-			if pPUUID, _ := player["puuid"].(string); pPUUID == targetPUUID {
+			if pPUUID, _ := player["puuid"].(string); strings.EqualFold(pPUUID, targetPUUID) {
 				targetTeam, _ = player["team"].(string)
 				break
 			}
 		}
 
-		teams, ok := m["teams"].(map[string]interface{})
-		if !ok { continue }
-		teamKey := "red"; if targetTeam == "Blue" { teamKey = "blue" }
-		teamInfo, _ := teams[teamKey].(map[string]interface{})
-		targetWon, _ := teamInfo["has_won"].(bool)
+		teams, _ := m["teams"].(map[string]interface{})
+		targetWon := false
+		// 데스매치 등 팀이 없는 경우를 대비한 유연한 처리
+		if teams != nil {
+			teamKey := "red"
+			if strings.EqualFold(targetTeam, "Blue") { teamKey = "blue" }
+			if teamInfo, ok := teams[teamKey].(map[string]interface{}); ok {
+				targetWon, _ = teamInfo["has_won"].(bool)
+			}
+		}
 
 		for _, p := range allPlayers {
 			player, ok := p.(map[string]interface{})
 			if !ok { continue }
 			pPUUID, _ := player["puuid"].(string)
-			if pPUUID == targetPUUID { continue }
+			if strings.EqualFold(pPUUID, targetPUUID) { continue }
 
 			pName, _ := player["name"].(string)
 			pTag, _ := player["tag"].(string)
@@ -198,15 +202,20 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 			s.Assists += pAssists
 			s.Score += pScore
 
-			if pTeam == targetTeam { s.AsAlly++ } else { s.AsEnemy++ }
+			// 팀이 있고 같으면 아군, 아니면 적군 (데스매치는 모두 적군으로 판정)
+			if pTeam != "" && strings.EqualFold(pTeam, targetTeam) { 
+				s.AsAlly++ 
+			} else { 
+				s.AsEnemy++ 
+			}
 			if !targetWon { s.TargetLost++ }
 		}
 	}
 
-	var results []PlayerStat
+	// 결과가 없을 경우 null 대신 빈 배열([]) 반환을 보장
+	results := make([]PlayerStat, 0)
 	for _, s := range statsMap {
 		results = append(results, *s)
-		// 어뷰징 탐지 임계값: 적군으로 3번 이상 만나고 대상의 패배율이 75% 이상
 		if s.AsEnemy >= 3 {
 			lossRatio := float64(s.TargetLost) / float64(s.Met)
 			if lossRatio >= 0.75 {
@@ -215,7 +224,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 		}
 	}
 
-	// 만난 횟수(Met) 기준으로 내림차순 정렬
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Met > results[j].Met
 	})
