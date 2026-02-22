@@ -254,18 +254,60 @@ func CheckForAbusing(matches []map[string]interface{}, targetPUUID string) []str
 
 // dbStatus returns current MongoDB connection status and players collection count
 func dbStatus(c *gin.Context) {
+	// Check if MONGO_URI env var is set
+	mongoURI := os.Getenv("MONGO_URI")
+	henrikKey := os.Getenv("HENRIK_API_KEY")
+	
+	result := gin.H{
+		"mongoURISet": mongoURI != "",
+		"henrikKeySet": henrikKey != "",
+	}
+	
+	if mongoURI == "" {
+		log.Printf("[dbStatus] MONGO_URI not set")
+		result["error"] = "MONGO_URI environment variable not set"
+		c.JSON(http.StatusInternalServerError, result)
+		return
+	}
+	
+	// If mongoClient is nil, try to connect now
 	if mongoClient == nil {
-		log.Printf("[dbStatus] mongoClient is nil")
-		c.JSON(http.StatusInternalServerError, gin.H{"connected": false, "error": "mongoClient is nil"})
+		log.Printf("[dbStatus] mongoClient is nil, attempting connection...")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		
+		clientOptions := options.Client().ApplyURI(mongoURI)
+		client, err := mongo.Connect(ctx, clientOptions)
+		if err != nil {
+			log.Printf("[dbStatus] Connection attempt failed: %v", err)
+			result["connectionError"] = err.Error()
+			c.JSON(http.StatusInternalServerError, result)
+			return
+		}
+		
+		if err := client.Ping(ctx, nil); err != nil {
+			log.Printf("[dbStatus] Ping failed: %v", err)
+			result["pingError"] = err.Error()
+			c.JSON(http.StatusInternalServerError, result)
+			return
+		}
+		
+		result["connected"] = true
+		result["note"] = "Connection successful but mongoClient was nil at init - check your MONGO_URI env var"
+		c.JSON(http.StatusOK, result)
+		client.Disconnect(ctx)
 		return
 	}
 
+	// mongoClient exists, check connection and collection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := mongoClient.Ping(ctx, nil); err != nil {
-		log.Printf("[dbStatus] MongoDB ping failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"connected": false, "error": err.Error()})
+		log.Printf("[dbStatus] Ping failed: %v", err)
+		result["connected"] = false
+		result["error"] = err.Error()
+		c.JSON(http.StatusInternalServerError, result)
 		return
 	}
 
@@ -273,9 +315,13 @@ func dbStatus(c *gin.Context) {
 	cnt, err := col.CountDocuments(ctx, bson.M{})
 	if err != nil {
 		log.Printf("[dbStatus] CountDocuments failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"connected": true, "countError": err.Error()})
+		result["connected"] = true
+		result["countError"] = err.Error()
+		c.JSON(http.StatusOK, result)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"connected": true, "playersCount": cnt})
+	result["connected"] = true
+	result["playersCount"] = cnt
+	c.JSON(http.StatusOK, result)
 }
