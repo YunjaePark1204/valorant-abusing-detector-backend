@@ -36,7 +36,7 @@ func init() {
 	}
 
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
-	httpClient = &http.Client{Timeout: 8 * time.Second} // 타임아웃을 Vercel 제한(10초)보다 안전하게 8초로 설정
+	httpClient = &http.Client{Timeout: 8 * time.Second} // Vercel 10초 컷을 피하기 위해 8초 설정
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -72,7 +72,10 @@ func getAccount(c *gin.Context) {
 	if mongoClient != nil {
 		col := mongoClient.Database("valorant").Collection("playerAccounts")
 		var result map[string]interface{}
-		if err := col.FindOne(context.Background(), bson.M{"name": name, "tag": tag}).Decode(&result); err == nil {
+		// DB 타임아웃 3초 추가
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := col.FindOne(ctx, bson.M{"name": name, "tag": tag}).Decode(&result); err == nil {
 			c.JSON(http.StatusOK, result)
 			return
 		}
@@ -83,11 +86,16 @@ func getAccount(c *gin.Context) {
 	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
 	resp, err := httpClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "라이엇 정보를 가져올 수 없습니다."})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "라이엇 서버와 통신할 수 없습니다."})
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "플레이어를 찾을 수 없거나 API 제한에 걸렸습니다."})
+		return
+	}
 
 	var apiRes map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&apiRes)
@@ -98,7 +106,9 @@ func getAccount(c *gin.Context) {
 	}
 
 	if mongoClient != nil {
-		mongoClient.Database("valorant").Collection("playerAccounts").InsertOne(context.Background(), userData)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		mongoClient.Database("valorant").Collection("playerAccounts").InsertOne(ctx, userData)
 	}
 	c.JSON(http.StatusOK, userData)
 }
@@ -107,50 +117,53 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	// 🔥 1. 타임아웃을 막기 위해 단 한 번만! 가장 최근 매치 15개를 1~2초 만에 초고속으로 가져옵니다.
 	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=15", region, puuid)
 	req, _ := http.NewRequest("GET", url, nil)
 	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
 	var newMatches []map[string]interface{}
 	resp, err := httpClient.Do(req)
-	if err == nil && resp.StatusCode == 200 {
-		var res struct { Data []map[string]interface{} `json:"data"` }
-		if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Data) > 0 {
-			newMatches = res.Data
+	if err == nil {
+		defer resp.Body.Close() // 메모리 누수 방지
+		if resp.StatusCode == 200 {
+			var res struct { Data []map[string]interface{} `json:"data"` }
+			if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Data) > 0 {
+				newMatches = res.Data
+			}
 		}
-		resp.Body.Close()
 	}
 
 	var finalMatches []map[string]interface{}
 
-	// 🔥 2. DB 누적 및 불러오기 (API 호출은 1번만 했지만, DB에서 100경기를 꺼내옵니다)
 	if mongoClient != nil {
 		col := mongoClient.Database("valorant").Collection("matches")
 
-		// 새로 가져온 15경기를 DB에 저장 (중복은 자동 무시됨)
+		// 🔥 서버 터짐 방지: DB 작업이 4초 이상 걸리면 즉시 포기하고 빠져나오는 안전장치
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+
 		for _, m := range newMatches {
 			if meta, ok := m["metadata"].(map[string]interface{}); ok {
 				if matchId, ok := meta["matchid"].(string); ok {
 					opts := options.Update().SetUpsert(true)
 					filter := bson.M{"metadata.matchid": matchId}
 					update := bson.M{"$set": m}
-					col.UpdateOne(context.Background(), filter, update, opts)
+					// 에러가 나더라도 무시하고 진행
+					col.UpdateOne(ctx, filter, update, opts)
 				}
 			}
 		}
 
-		// DB에 저장된 '이 유저의 모든 매치'를 시간 역순으로 최대 100경기 불러옴 (DB 조희는 0.1초 소요)
 		filter := bson.M{"players.all_players.puuid": primitive.Regex{Pattern: "^" + puuid + "$", Options: "i"}}
 		findOpts := options.Find().SetSort(bson.D{{"metadata.game_start", -1}}).SetLimit(100)
 		
-		cursor, err := col.Find(context.Background(), filter, findOpts)
+		cursor, err := col.Find(ctx, filter, findOpts)
 		if err == nil {
 			var dbMatches []map[string]interface{}
-			if err = cursor.All(context.Background(), &dbMatches); err == nil && len(dbMatches) > 0 {
-				finalMatches = dbMatches // DB에서 꺼내온 최대 100경기로 대체!
+			if err = cursor.All(ctx, &dbMatches); err == nil && len(dbMatches) > 0 {
+				finalMatches = dbMatches // 성공하면 DB에 쌓인 전적 사용
 			} else {
-				finalMatches = newMatches
+				finalMatches = newMatches // 실패하면 방금 가져온 전적만 사용
 			}
 		} else {
 			finalMatches = newMatches
@@ -159,7 +172,6 @@ func getMatches(c *gin.Context) {
 		finalMatches = newMatches
 	}
 
-	// 데이터가 아예 없는 경우 방어 코드
 	if len(finalMatches) == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"matchesCount":    0,
