@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -35,7 +36,6 @@ func init() {
 	}
 
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
-	// 타임아웃 15초 설정 (Vercel 제한 내에서 최대한 기다림)
 	httpClient = &http.Client{Timeout: 15 * time.Second}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -107,13 +107,10 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	// 🔥 동시 요청 차단(DDOS 방어)을 우회하기 위해 '순차적'으로 조회합니다.
-	// 사용자가 언급한 데스매치(deathmatch)와 경쟁전(competitive)을 명시적으로 포함
 	filters := []string{"", "competitive", "deathmatch", "unrated"}
 	var allMatches []map[string]interface{}
 
 	for _, f := range filters {
-		// size=15로 여유있게 요청
 		url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=15", region, puuid)
 		if f != "" {
 			url += "&filter=" + f
@@ -123,9 +120,7 @@ func getMatches(c *gin.Context) {
 		if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
 		resp, err := httpClient.Do(req)
-		if err != nil {
-			continue // 에러나면 다음 필터로 조용히 넘어감
-		}
+		if err != nil { continue }
 		
 		if resp.StatusCode == 200 {
 			var res struct { Data []map[string]interface{} `json:"data"` }
@@ -136,7 +131,6 @@ func getMatches(c *gin.Context) {
 		resp.Body.Close()
 	}
 
-	// 중복된 매치 제거 (전체조회 10개와 경쟁전조회 10개가 겹칠 수 있으므로)
 	uniqueMatchesMap := make(map[string]map[string]interface{})
 	for _, m := range allMatches {
 		if meta, ok := m["metadata"].(map[string]interface{}); ok {
@@ -151,7 +145,35 @@ func getMatches(c *gin.Context) {
 		uniqueMatches = append(uniqueMatches, m)
 	}
 
-	// 최신순 정렬 (game_start 기준 내림차순)
+	// 🔥 OP.GG 방식의 데이터베이스 누적 로직 적용
+	if mongoClient != nil {
+		col := mongoClient.Database("valorant").Collection("matches")
+
+		// 1. 방금 조회한 새로운 매치들을 MongoDB에 추가 (이미 있으면 무시)
+		for _, m := range uniqueMatches {
+			if meta, ok := m["metadata"].(map[string]interface{}); ok {
+				if matchId, ok := meta["matchid"].(string); ok {
+					opts := options.Update().SetUpsert(true)
+					filter := bson.M{"metadata.matchid": matchId}
+					update := bson.M{"$set": m}
+					col.UpdateOne(context.Background(), filter, update, opts)
+				}
+			}
+		}
+
+		// 2. DB에 저장된 '이 유저의 모든 매치'를 시간 역순으로 최대 100경기까지 불러옴
+		filter := bson.M{"players.all_players.puuid": primitive.Regex{Pattern: "^" + puuid + "$", Options: "i"}}
+		findOpts := options.Find().SetSort(bson.D{{"metadata.game_start", -1}}).SetLimit(200)
+		
+		cursor, err := col.Find(context.Background(), filter, findOpts)
+		if err == nil {
+			var dbMatches []map[string]interface{}
+			if err = cursor.All(context.Background(), &dbMatches); err == nil && len(dbMatches) > 0 {
+				uniqueMatches = dbMatches // API 결과 대신 DB에 누적된 방대한 전적 사용!
+			}
+		}
+	}
+
 	sort.Slice(uniqueMatches, func(i, j int) bool {
 		metaI, _ := uniqueMatches[i]["metadata"].(map[string]interface{})
 		metaJ, _ := uniqueMatches[j]["metadata"].(map[string]interface{})
@@ -160,7 +182,6 @@ func getMatches(c *gin.Context) {
 		return startI > startJ
 	})
 
-	// 데이터가 아예 없는 경우 방어 코드
 	if len(uniqueMatches) == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"matchesCount":    0,
@@ -247,7 +268,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 		targetWon := false
 		resultStr := "-"
 
-		// 데스매치 등은 teams 데이터가 없으므로 무승부(-)로 처리됨
 		if teams != nil && targetTeam != "" {
 			teamKey := "red"
 			if strings.EqualFold(targetTeam, "Blue") { teamKey = "blue" }
