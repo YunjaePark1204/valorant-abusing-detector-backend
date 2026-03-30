@@ -36,7 +36,7 @@ func init() {
 	}
 
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
-	httpClient = &http.Client{Timeout: 15 * time.Second}
+	httpClient = &http.Client{Timeout: 8 * time.Second} // 타임아웃을 Vercel 제한(10초)보다 안전하게 8초로 설정
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -107,50 +107,29 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	filters := []string{"", "competitive", "deathmatch", "unrated"}
-	var allMatches []map[string]interface{}
+	// 🔥 1. 타임아웃을 막기 위해 단 한 번만! 가장 최근 매치 15개를 1~2초 만에 초고속으로 가져옵니다.
+	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=15", region, puuid)
+	req, _ := http.NewRequest("GET", url, nil)
+	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
-	for _, f := range filters {
-		url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=15", region, puuid)
-		if f != "" {
-			url += "&filter=" + f
-		}
-
-		req, _ := http.NewRequest("GET", url, nil)
-		if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
-
-		resp, err := httpClient.Do(req)
-		if err != nil { continue }
-		
-		if resp.StatusCode == 200 {
-			var res struct { Data []map[string]interface{} `json:"data"` }
-			if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Data) > 0 {
-				allMatches = append(allMatches, res.Data...)
-			}
+	var newMatches []map[string]interface{}
+	resp, err := httpClient.Do(req)
+	if err == nil && resp.StatusCode == 200 {
+		var res struct { Data []map[string]interface{} `json:"data"` }
+		if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Data) > 0 {
+			newMatches = res.Data
 		}
 		resp.Body.Close()
 	}
 
-	uniqueMatchesMap := make(map[string]map[string]interface{})
-	for _, m := range allMatches {
-		if meta, ok := m["metadata"].(map[string]interface{}); ok {
-			if matchId, ok := meta["matchid"].(string); ok {
-				uniqueMatchesMap[matchId] = m
-			}
-		}
-	}
+	var finalMatches []map[string]interface{}
 
-	var uniqueMatches []map[string]interface{}
-	for _, m := range uniqueMatchesMap {
-		uniqueMatches = append(uniqueMatches, m)
-	}
-
-	// 🔥 OP.GG 방식의 데이터베이스 누적 로직 적용
+	// 🔥 2. DB 누적 및 불러오기 (API 호출은 1번만 했지만, DB에서 100경기를 꺼내옵니다)
 	if mongoClient != nil {
 		col := mongoClient.Database("valorant").Collection("matches")
 
-		// 1. 방금 조회한 새로운 매치들을 MongoDB에 추가 (이미 있으면 무시)
-		for _, m := range uniqueMatches {
+		// 새로 가져온 15경기를 DB에 저장 (중복은 자동 무시됨)
+		for _, m := range newMatches {
 			if meta, ok := m["metadata"].(map[string]interface{}); ok {
 				if matchId, ok := meta["matchid"].(string); ok {
 					opts := options.Update().SetUpsert(true)
@@ -161,28 +140,27 @@ func getMatches(c *gin.Context) {
 			}
 		}
 
-		// 2. DB에 저장된 '이 유저의 모든 매치'를 시간 역순으로 최대 100경기까지 불러옴
+		// DB에 저장된 '이 유저의 모든 매치'를 시간 역순으로 최대 100경기 불러옴 (DB 조희는 0.1초 소요)
 		filter := bson.M{"players.all_players.puuid": primitive.Regex{Pattern: "^" + puuid + "$", Options: "i"}}
-		findOpts := options.Find().SetSort(bson.D{{"metadata.game_start", -1}}).SetLimit(200)
+		findOpts := options.Find().SetSort(bson.D{{"metadata.game_start", -1}}).SetLimit(100)
 		
 		cursor, err := col.Find(context.Background(), filter, findOpts)
 		if err == nil {
 			var dbMatches []map[string]interface{}
 			if err = cursor.All(context.Background(), &dbMatches); err == nil && len(dbMatches) > 0 {
-				uniqueMatches = dbMatches // API 결과 대신 DB에 누적된 방대한 전적 사용!
+				finalMatches = dbMatches // DB에서 꺼내온 최대 100경기로 대체!
+			} else {
+				finalMatches = newMatches
 			}
+		} else {
+			finalMatches = newMatches
 		}
+	} else {
+		finalMatches = newMatches
 	}
 
-	sort.Slice(uniqueMatches, func(i, j int) bool {
-		metaI, _ := uniqueMatches[i]["metadata"].(map[string]interface{})
-		metaJ, _ := uniqueMatches[j]["metadata"].(map[string]interface{})
-		startI, _ := metaI["game_start"].(float64)
-		startJ, _ := metaJ["game_start"].(float64)
-		return startI > startJ
-	})
-
-	if len(uniqueMatches) == 0 {
+	// 데이터가 아예 없는 경우 방어 코드
+	if len(finalMatches) == 0 {
 		c.JSON(http.StatusOK, gin.H{
 			"matchesCount":    0,
 			"abusingDetected": false,
@@ -193,10 +171,10 @@ func getMatches(c *gin.Context) {
 		return
 	}
 
-	analyzedPlayers, findings, histories := AnalyzeMatches(uniqueMatches, puuid)
+	analyzedPlayers, findings, histories := AnalyzeMatches(finalMatches, puuid)
 
 	c.JSON(http.StatusOK, gin.H{
-		"matchesCount":    len(uniqueMatches),
+		"matchesCount":    len(finalMatches),
 		"abusingDetected": len(findings) > 0,
 		"details":         findings,
 		"players":         analyzedPlayers,
