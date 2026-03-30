@@ -106,7 +106,8 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=10", region, puuid)
+	// 🔥 API 키 업그레이드 반영: 10경기 -> 30경기로 대폭 확장 (Vercel 타임아웃 안전선)
+	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=30", region, puuid)
 	req, _ := http.NewRequest("GET", url, nil)
 	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
@@ -127,11 +128,10 @@ func getMatches(c *gin.Context) {
 		"abusingDetected": len(findings) > 0,
 		"details":         findings,
 		"players":         analyzedPlayers,
-		"history":         histories, // 새롭게 추가된 전적 기록
+		"history":         histories,
 	})
 }
 
-// 조우한 플레이어 통계
 type PlayerStat struct {
 	PUUID      string  `json:"puuid"`
 	Name       string  `json:"name"`
@@ -145,7 +145,6 @@ type PlayerStat struct {
 	Score      float64 `json:"score"`
 }
 
-// 개별 매치 요약 (전적 검색용)
 type MatchSummary struct {
 	MatchID string  `json:"matchId"`
 	Map     string  `json:"map"`
@@ -178,7 +177,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 		var targetTeam, targetAgent string
 		var targetKills, targetDeaths, targetAssists, targetScore float64
 
-		// 1. 타겟 유저 찾기 및 내 전적 추출
 		for _, p := range allPlayers {
 			player, _ := p.(map[string]interface{})
 			if pPUUID, _ := player["puuid"].(string); strings.EqualFold(pPUUID, targetPUUID) {
@@ -194,10 +192,9 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 			}
 		}
 
-		// 2. 승패 판정
 		teams, _ := m["teams"].(map[string]interface{})
 		targetWon := false
-		resultStr := "-" // 팀 데스매치 등 무승부/판독불가 기본값
+		resultStr := "-"
 
 		if teams != nil && targetTeam != "" {
 			teamKey := "red"
@@ -217,7 +214,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 			}
 		}
 
-		// 내 전적 히스토리에 추가
 		histories = append(histories, MatchSummary{
 			MatchID: matchId,
 			Map:     mapName,
@@ -230,7 +226,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 			Score:   targetScore,
 		})
 
-		// 3. 만난 플레이어 통계 누적
 		for _, p := range allPlayers {
 			player, ok := p.(map[string]interface{})
 			if !ok { continue }
@@ -272,6 +267,7 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 	results := make([]PlayerStat, 0)
 	for _, s := range statsMap {
 		results = append(results, *s)
+		// 30경기로 늘어났으므로 3번 이상 만나는 빈도가 확연히 늘어납니다!
 		if s.AsEnemy >= 3 {
 			lossRatio := float64(s.TargetLost) / float64(s.Met)
 			if lossRatio >= 0.75 {
