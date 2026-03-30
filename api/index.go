@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +35,7 @@ func init() {
 	}
 
 	henrikAPIKey = os.Getenv("HENRIK_API_KEY")
+	// 타임아웃 15초 설정 (Vercel 제한 내에서 최대한 기다림)
 	httpClient = &http.Client{Timeout: 15 * time.Second}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -107,38 +107,36 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	// 🔥 업그레이드된 API 키 전용: 병렬 요청(Goroutine)으로 API 10개 제한 돌파
-	filters := []string{"", "competitive", "unrated", "swiftplay"}
+	// 🔥 동시 요청 차단(DDOS 방어)을 우회하기 위해 '순차적'으로 조회합니다.
+	// 사용자가 언급한 데스매치(deathmatch)와 경쟁전(competitive)을 명시적으로 포함
+	filters := []string{"", "competitive", "deathmatch", "unrated"}
 	var allMatches []map[string]interface{}
-	var mu sync.Mutex
-	var wg sync.WaitGroup
 
-	for _, filter := range filters {
-		wg.Add(1)
-		go func(f string) {
-			defer wg.Done()
-			url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=10", region, puuid)
-			if f != "" {
-				url += "&filter=" + f
-			}
-			req, _ := http.NewRequest("GET", url, nil)
-			if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
+	for _, f := range filters {
+		// size=15로 여유있게 요청
+		url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=15", region, puuid)
+		if f != "" {
+			url += "&filter=" + f
+		}
 
-			resp, err := httpClient.Do(req)
-			if err != nil || resp.StatusCode != 200 { return }
-			defer resp.Body.Close()
+		req, _ := http.NewRequest("GET", url, nil)
+		if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
 
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			continue // 에러나면 다음 필터로 조용히 넘어감
+		}
+		
+		if resp.StatusCode == 200 {
 			var res struct { Data []map[string]interface{} `json:"data"` }
 			if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Data) > 0 {
-				mu.Lock()
 				allMatches = append(allMatches, res.Data...)
-				mu.Unlock()
 			}
-		}(filter)
+		}
+		resp.Body.Close()
 	}
-	wg.Wait() // 4개의 요청이 모두 끝날 때까지 대기 (순식간에 처리됨)
 
-	// 중복된 매치 제거 (여러 필터에 공통으로 걸린 매치)
+	// 중복된 매치 제거 (전체조회 10개와 경쟁전조회 10개가 겹칠 수 있으므로)
 	uniqueMatchesMap := make(map[string]map[string]interface{})
 	for _, m := range allMatches {
 		if meta, ok := m["metadata"].(map[string]interface{}); ok {
@@ -249,6 +247,7 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 		targetWon := false
 		resultStr := "-"
 
+		// 데스매치 등은 teams 데이터가 없으므로 무승부(-)로 처리됨
 		if teams != nil && targetTeam != "" {
 			teamKey := "red"
 			if strings.EqualFold(targetTeam, "Blue") { teamKey = "blue" }
