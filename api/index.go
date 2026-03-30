@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -106,25 +107,77 @@ func getMatches(c *gin.Context) {
 	puuid := c.Param("puuid")
 	region := c.DefaultQuery("region", "kr")
 
-	// 🔥 API 키 업그레이드 반영: 10경기 -> 30경기로 대폭 확장 (Vercel 타임아웃 안전선)
-	url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=30", region, puuid)
-	req, _ := http.NewRequest("GET", url, nil)
-	if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
+	// 🔥 업그레이드된 API 키 전용: 병렬 요청(Goroutine)으로 API 10개 제한 돌파
+	filters := []string{"", "competitive", "unrated", "swiftplay"}
+	var allMatches []map[string]interface{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
-	resp, err := httpClient.Do(req)
-	if err != nil || resp.StatusCode != 200 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "경기 데이터를 가져올 수 없습니다."})
+	for _, filter := range filters {
+		wg.Add(1)
+		go func(f string) {
+			defer wg.Done()
+			url := fmt.Sprintf("https://api.henrikdev.xyz/valorant/v3/by-puuid/matches/%s/%s?size=10", region, puuid)
+			if f != "" {
+				url += "&filter=" + f
+			}
+			req, _ := http.NewRequest("GET", url, nil)
+			if henrikAPIKey != "" { req.Header.Add("Authorization", henrikAPIKey) }
+
+			resp, err := httpClient.Do(req)
+			if err != nil || resp.StatusCode != 200 { return }
+			defer resp.Body.Close()
+
+			var res struct { Data []map[string]interface{} `json:"data"` }
+			if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && len(res.Data) > 0 {
+				mu.Lock()
+				allMatches = append(allMatches, res.Data...)
+				mu.Unlock()
+			}
+		}(filter)
+	}
+	wg.Wait() // 4개의 요청이 모두 끝날 때까지 대기 (순식간에 처리됨)
+
+	// 중복된 매치 제거 (여러 필터에 공통으로 걸린 매치)
+	uniqueMatchesMap := make(map[string]map[string]interface{})
+	for _, m := range allMatches {
+		if meta, ok := m["metadata"].(map[string]interface{}); ok {
+			if matchId, ok := meta["matchid"].(string); ok {
+				uniqueMatchesMap[matchId] = m
+			}
+		}
+	}
+
+	var uniqueMatches []map[string]interface{}
+	for _, m := range uniqueMatchesMap {
+		uniqueMatches = append(uniqueMatches, m)
+	}
+
+	// 최신순 정렬 (game_start 기준 내림차순)
+	sort.Slice(uniqueMatches, func(i, j int) bool {
+		metaI, _ := uniqueMatches[i]["metadata"].(map[string]interface{})
+		metaJ, _ := uniqueMatches[j]["metadata"].(map[string]interface{})
+		startI, _ := metaI["game_start"].(float64)
+		startJ, _ := metaJ["game_start"].(float64)
+		return startI > startJ
+	})
+
+	// 데이터가 아예 없는 경우 방어 코드
+	if len(uniqueMatches) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"matchesCount":    0,
+			"abusingDetected": false,
+			"details":         []string{},
+			"players":         []PlayerStat{},
+			"history":         []MatchSummary{},
+		})
 		return
 	}
-	defer resp.Body.Close()
 
-	var res struct { Data []map[string]interface{} `json:"data"` }
-	json.NewDecoder(resp.Body).Decode(&res)
-
-	analyzedPlayers, findings, histories := AnalyzeMatches(res.Data, puuid)
+	analyzedPlayers, findings, histories := AnalyzeMatches(uniqueMatches, puuid)
 
 	c.JSON(http.StatusOK, gin.H{
-		"matchesCount":    len(res.Data),
+		"matchesCount":    len(uniqueMatches),
 		"abusingDetected": len(findings) > 0,
 		"details":         findings,
 		"players":         analyzedPlayers,
@@ -267,7 +320,6 @@ func AnalyzeMatches(matches []map[string]interface{}, targetPUUID string) ([]Pla
 	results := make([]PlayerStat, 0)
 	for _, s := range statsMap {
 		results = append(results, *s)
-		// 30경기로 늘어났으므로 3번 이상 만나는 빈도가 확연히 늘어납니다!
 		if s.AsEnemy >= 3 {
 			lossRatio := float64(s.TargetLost) / float64(s.Met)
 			if lossRatio >= 0.75 {
