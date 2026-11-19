@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/YunjaePark1204/valorant-abusing-detector-backend/internal/detector"
+	"github.com/YunjaePark1204/valorant-abusing-detector-backend/pkg/detector"
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
